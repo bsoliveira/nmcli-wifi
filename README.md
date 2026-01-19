@@ -1,37 +1,30 @@
-# nmcli-wifi.sh
+# nmcli-wifi
 
-Script simples para gerenciar Wi‑Fi utilizando o **nmcli** (NetworkManager).
+Simple script to manage Wi-Fi connections using **nmcli** (NetworkManager).
 
-Ideal para ambientes sem interface gráfica, *tiling window managers* e setups minimalistas.
-
-
-## Requisitos
-
-* (nmcli) NetworkManager
+Ideal for environments without a graphical interface, tiling window managers, and minimalist setups.
 
 
+## Requirements
 
-## Uso
+- nmcli (NetworkManager)
+- Bash
 
-Dê permissão de execução ao script:
 
-```bash
-chmod +x nmcli-wifi.sh
-```
+## Usage
 
-Execute:
+Make the script executable:
 
 ```bash
-./nmcli-wifi
+chmod +x nmcli-wifi
 ```
 
-O script irá:
 
-* Mostrar as redes Wi‑Fi disponíveis
-* Indicar a rede atualmente conectada (se houver)
-* Permitir conectar a uma rede
-* Pedir senha apenas quando necessário
-* Permitir ativar/desativar o Wi‑Fi
-* Permitir desconectar da rede atual
+## Features
 
-Tudo de forma interativa no terminal.
+* Lists available Wi-Fi networks
+* Displays signal strength
+* Connects to open or secured networks
+* Disconnects from the current network
+* Enables or disables Wi-Fi when needed
+* Interactive menu via terminal
