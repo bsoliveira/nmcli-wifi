@@ -89,15 +89,19 @@ fi
 echo
 
 i=1
+echo "Select the network to connect to"
+printf "%-2s %-6s %-10s %s\n" "#" "SIGNAL" "SECURITY"  "SSID" 
 for entry in "${WIFI_LIST[@]}"; do
     ssid="${entry%%|*}"
     rest="${entry#*|}"
     sec="${rest%%|*}"
     signal="${rest##*|}"
-    printf "%d) %-30s %-12s %4s\n" "$i" "$ssid" "$sec" "$signal"
+    printf "%d) %-6s %-10s %s\n" "$i" "$signal" "$sec"  "$ssid" 
     ((i++))
 done
 
+echo
+echo "or other options..."
 if [[ -n "$current_ssid" ]]; then
     opt_disconnect="$i"
     echo "${opt_disconnect}) Disconnect Wi-Fi"
@@ -151,11 +155,6 @@ if nmcli device wifi connect "$ssid" >/dev/null 2>&1; then
 fi
 
 # Ask for password only if required
-read -rsp "Wi-Fi password: " wifi_password
-echo
+echo "You may be prompted for a password..."
 
-if nmcli device wifi connect "$ssid" password "$wifi_password" >/dev/null 2>&1; then
-    echo "Connected successfully"
-else
-    die "Failed to connect: incorrect password or authentication error"
-fi
+nmcli device wifi connect "$ssid" --ask
