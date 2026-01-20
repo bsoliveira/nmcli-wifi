@@ -1,160 +1,95 @@
 #!/usr/bin/env bash
-# nmcli-wifi — Interactive Wi-Fi manager in Bash using nmcli
-# Requirements: nmcli (NetworkManager)
+# nmcli-wifi — Minimal interactive Wi-Fi manager
+# Requires: NetworkManager (nmcli)
 
-set -o errexit
-set -o nounset
-set -o pipefail
+set -euo pipefail
 
-### Utility functions
-
-die() {
-    echo "Error: $*" >&2
-    exit 1
+status() {
+    wifi_state="$(nmcli -t radio wifi)"
+    ssid="$(
+        nmcli -t -f NAME,TYPE connection show --active |
+        awk -F: '$2=="802-11-wireless"{print $1}'
+    )"
 }
 
-### Checks
-
-command -v nmcli >/dev/null 2>&1 || die "nmcli not found"
-
-### Wi-Fi state
-
-wifi_state="$(nmcli -t -f WIFI general)"
-
-if [[ "$wifi_state" == "disabled" ]]; then
+header() {
     clear
+    status
     echo "=== Wi-Fi Manager ==="
-    echo
-    echo "Wi-Fi is turned off."
-    echo
-    echo "1) Enable Wi-Fi"
-    echo "2) Exit"
-    echo
 
-    read -rp "Choose an option: " opt
+    if [[ "$wifi_state" == "disabled" ]]; then
+        echo "Wi-Fi: OFF"
+    elif [[ -n "$ssid" ]]; then
+        echo "Connected: $ssid"
+    else
+        echo "Wi-Fi: ON"
+    fi
 
-    case "$opt" in
-        1)
-            echo "Enabling Wi-Fi..."
-            nmcli radio wifi on
-            sleep 5
-            ;;
-        2)
-            exit 0
-            ;;
-        *)
-            die "Invalid option"
-            ;;
+    echo
+    echo "$1"
+}
+
+toggle() {
+    status
+    [[ "$wifi_state" == "enabled" ]] \
+        && nmcli radio wifi off \
+        || nmcli radio wifi on
+}
+
+connect() {
+    echo "trying to connect... "
+    nmcli device wifi connect "$1" --ask
+}
+
+list_networks() {
+    status
+
+    if [[ "$wifi_state" == "disabled" ]]; then
+        header "Wi-Fi is OFF"
+        echo "1) Turn Wi-Fi ON"
+        echo "2) Back"
+        echo
+        read -rp "Choice: " c
+        [[ "$c" == "1" ]] || return
+        toggle
+        sleep 2
+    fi
+
+    header "Searching for networks"
+
+    mapfile -t nets < <(nmcli -t -f SSID,SIGNAL,SECURITY device wifi list)
+
+    status
+    header "Available networks"
+    printf "%-3s %-6s %-10s %s\n" "#" "SIGNAL" "SECURITY" "SSID"
+ 
+    for i in "${!nets[@]}"; do
+        awk -F: -v n=$((i+1)) '
+            { printf "%d) %-6s %-10s %s\n", n, $2, ($3=="--"?"OPEN":$3), $1 }
+        ' <<< "${nets[$i]}"
+    done
+
+    echo
+    read -rp "Network number (or Enter to cancel): " c
+    [[ "$c" =~ ^[0-9]+$ ]] || return
+
+    idx=$((c-1))
+    (( idx >= 0 && idx < ${#nets[@]} )) || return
+
+    connect "${nets[$idx]%%:*}"
+}
+
+while true; do
+    header "Main menu"
+    echo "1) List networks"
+    echo "2) Toggle Wi-Fi"
+    echo "*) Exit"
+    echo
+    read -rp "Choice: " c
+
+    case "$c" in
+        1) list_networks ;;
+        2) toggle ;;
+        *) exit 0 ;;
     esac
-fi
-
-### Active Wi-Fi network
-
-current_ssid="$(
-    nmcli -t -f NAME,TYPE connection show --active \
-    | awk -F: '$2=="802-11-wireless" {print $1}'
-)"
-
-### List networks
-
-clear
-echo "=== Wi-Fi Manager ==="
-echo "Scanning available networks..."
-echo
-
-mapfile -t WIFI_LIST < <(
-    nmcli -t -f SIGNAL,SECURITY,SSID device wifi list \
-    | awk -F: '
-        $3 != "" {
-            signal=$1
-            if ($2 ~ /WPA|WEP/) sec="(secured)"
-            else sec="(open)"
-            printf "%s|%s|%s%%\n", $3, sec, signal
-        }
-    ' | sort -t'|' -k1,1 -u
-)
-
-### Menu
-
-clear
-echo "=== Wi-Fi Manager ==="
-echo
-
-if [[ -n "$current_ssid" ]]; then
-    echo "Connected to network: $current_ssid"
-else
-    echo "No Wi-Fi network connected"
-fi
-
-echo
-
-i=1
-echo "Select the network to connect to"
-printf "%-2s %-6s %-10s %s\n" "#" "SIGNAL" "SECURITY"  "SSID" 
-for entry in "${WIFI_LIST[@]}"; do
-    ssid="${entry%%|*}"
-    rest="${entry#*|}"
-    sec="${rest%%|*}"
-    signal="${rest##*|}"
-    printf "%d) %-6s %-10s %s\n" "$i" "$signal" "$sec"  "$ssid" 
-    ((i++))
 done
-
-echo
-echo "or other options..."
-if [[ -n "$current_ssid" ]]; then
-    opt_disconnect="$i"
-    echo "${opt_disconnect}) Disconnect Wi-Fi"
-    ((i++))
-fi
-
-opt_disable="$i"
-echo "${opt_disable}) Disable Wi-Fi"
-((i++))
-
-opt_cancel="$i"
-echo "${opt_cancel}) Cancel"
-
-echo
-read -rp "Choose an option: " choice
-
-### Process choice
-
-[[ "$choice" =~ ^[0-9]+$ ]] || die "Invalid option"
-
-if [[ -n "$current_ssid" && "$choice" -eq "$opt_disconnect" ]]; then
-    nmcli con down id "$current_ssid" >/dev/null
-    echo "Disconnected from network '$current_ssid'"
-    exit 0
-fi
-
-if [[ "$choice" -eq "$opt_disable" ]]; then
-    nmcli radio wifi off
-    echo "Wi-Fi disabled"
-    exit 0
-fi
-
-if [[ "$choice" -eq "$opt_cancel" ]]; then
-    exit 0
-fi
-
-index=$((choice - 1))
-[[ "$index" -ge 0 && "$index" -lt "${#WIFI_LIST[@]}" ]] || die "Invalid option"
-
-ssid="${WIFI_LIST[$index]%%|*}"
-
-### Connect
-
-echo
-echo "Connecting to network: $ssid"
-
-# Try to connect without password (open or saved network)
-if nmcli device wifi connect "$ssid" >/dev/null 2>&1; then
-    echo "Connected successfully"
-    exit 0
-fi
-
-# Ask for password only if required
-echo "You may be prompted for a password..."
-
-nmcli device wifi connect "$ssid" --ask
