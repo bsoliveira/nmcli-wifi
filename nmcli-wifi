@@ -37,8 +37,21 @@ toggle() {
 }
 
 connect() {
-    echo "trying to connect... "
+    echo "Connecting to: $1"
     nmcli device wifi connect "$1" --ask
+}
+
+scan_networks() {
+    local i
+    for i in {1..10}; do
+        mapfile -t nets < <(
+            nmcli -t -f SSID,SIGNAL,SECURITY device wifi list --rescan yes |
+            awk -F: '$1 !~ /^[[:space:]]*$/'
+        )
+        (( ${#nets[@]} )) && return 0
+        sleep 1
+    done
+    return 1
 }
 
 list_networks() {
@@ -50,31 +63,40 @@ list_networks() {
         echo "2) Back"
         echo
         read -rp "Choice: " c
+
         [[ "$c" == "1" ]] || return
         toggle
-        sleep 2
     fi
 
-    header "Searching for networks"
+    header "Searching for networks..."
 
-    mapfile -t nets < <(nmcli -t -f SSID,SIGNAL,SECURITY device wifi list)
+    if ! scan_networks; then
+        echo "No networks found."
+        read -rp "Press Enter to return..." _
+        return
+    fi
 
-    status
     header "Available networks"
     printf "%-3s %-6s %-10s %s\n" "#" "SIGNAL" "SECURITY" "SSID"
- 
+
     for i in "${!nets[@]}"; do
         awk -F: -v n=$((i+1)) '
-            { printf "%d) %-6s %-10s %s\n", n, $2, ($3=="--"?"OPEN":$3), $1 }
+            { printf "%d) %-6s %-10s %s\n",
+              n, $2, ($3=="--"?"OPEN":$3), $1 }
         ' <<< "${nets[$i]}"
     done
 
     echo
     read -rp "Network number (or Enter to cancel): " c
-    [[ "$c" =~ ^[0-9]+$ ]] || return
 
-    idx=$((c-1))
-    (( idx >= 0 && idx < ${#nets[@]} )) || return
+    if ! [[ "$c" =~ ^[0-9]+$ ]]; then
+        return
+    fi
+
+    idx=$((c - 1))
+    if (( idx < 0 || idx >= ${#nets[@]} )); then
+        return
+    fi
 
     connect "${nets[$idx]%%:*}"
 }
