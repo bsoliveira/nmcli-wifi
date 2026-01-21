@@ -50,7 +50,7 @@ wifi_is_connected() {
 wifi_toggle() {
     if wifi_is_on; then
         nmcli radio wifi off
-        sleep 1
+        sleep 0.5
         refresh_state
         return
     fi
@@ -72,6 +72,8 @@ wifi_connect() {
     if ! nmcli device wifi connect "$1" --ask; then
         read -rp "Connection failed. Press Enter to continue..." _
     fi
+
+    refresh_state
 }
 
 # Draws the main header using cached state
@@ -102,17 +104,11 @@ wifi_list_networks() {
 
     header "Searching for networks..."
 
-    # Scan for available networks.
-    # Short retry to handle interface warm-up; deduplicate and ignore empty SSIDs.
-    for i in {1..3}; do
-        mapfile -t nets < <(
-            nmcli -t -f SSID,SIGNAL,SECURITY device wifi list --rescan yes |
-            awk -F: '!seen[$1]++ && $1 !~ /^[[:space:]]*$/'
-        )
-
-        (( ${#nets[@]} )) && break
-        sleep 0.5
-    done
+    # Scan for available networks, deduplicate and ignore empty SSIDs.
+    mapfile -t nets < <(
+        nmcli -t -f SSID,SIGNAL,SECURITY device wifi list |
+        awk -F: '!seen[$1]++ && $1 !~ /^[[:space:]]*$/'
+    )
 
     if (( ${#nets[@]} == 0 )); then
         echo "No networks found."
@@ -145,9 +141,7 @@ wifi_list_networks() {
         return
     fi
 
-    wifi_connect "${nets[$idx]%%:*}"
-
-    refresh_state
+    wifi_connect "${nets[$idx]%%:*}"   
 }
 
 ## Program entry point
