@@ -1,26 +1,88 @@
 #!/usr/bin/env bash
+#
 # nmcli-wifi — Minimal interactive Wi-Fi manager
-# Requires: NetworkManager (nmcli)
+#
+# Description:
+#   Simple interactive Wi-Fi manager built on top of NetworkManager (nmcli).
+#
+# Requirements:
+#   - Bash 4+
+#   - NetworkManager (nmcli)
+#
+# Notes:
+#   - Uses cached state to avoid repeated nmcli calls.
+#   - Designed for interactive use.
+#
 
+# Strict mode:
+# -e : exit on error
+# -u : treat unset variables as errors
+# -o pipefail : fail pipelines if any command fails
 set -euo pipefail
 
-status() {
-    wifi_state="$(nmcli -t radio wifi)"
-    ssid="$(
+# Cached state (updated via refresh_state)
+declare -g wifi_state="disabled"
+declare -g current_ssid=""
+
+# Refresh cached Wi-Fi state (radio status and active SSID)
+refresh_state() {
+    wifi_state="$(nmcli -t radio wifi 2>/dev/null || echo disabled)"
+
+    current_ssid="$(
         nmcli -t -f NAME,TYPE connection show --active |
         awk -F: '$2=="802-11-wireless"{print $1}'
     )"
 }
 
+# Returns success if Wi-Fi radio is enabled
+wifi_is_on() {
+    [[ "$wifi_state" == "enabled" ]]
+}
+
+# Returns success if Wi-Fi radio is connected
+wifi_is_connected() {
+    [[ -n "$current_ssid" ]]
+}
+
+# Toggle Wi-Fi radio on/off.
+# When enabling, wait briefly for NetworkManager auto-reconnection
+# and refresh cached state.
+wifi_toggle() {
+    if wifi_is_on; then
+        nmcli radio wifi off
+        sleep 1
+        refresh_state
+        return
+    fi
+
+    nmcli radio wifi on
+
+    for i in {1..5}; do
+        refresh_state
+        wifi_is_connected && return
+        sleep 1
+    done
+
+    refresh_state
+}
+
+# Connect to a Wi-Fi network by SSID (interactive password prompt)
+wifi_connect() {
+    echo "Connecting to: $1"
+    if ! nmcli device wifi connect "$1" --ask; then
+        read -rp "Connection failed. Press Enter to continue..." _
+    fi
+}
+
+# Draws the main header using cached state
 header() {
     clear
-    status
     echo "=== Wi-Fi Manager ==="
 
-    if [[ "$wifi_state" == "disabled" ]]; then
+    if ! wifi_is_on; then
         echo "Wi-Fi: OFF"
-    elif [[ -n "$ssid" ]]; then
-        echo "Connected: $ssid"
+    elif [[ -n "$current_ssid" ]]; then
+        echo "Connected: $current_ssid"
     else
         echo "Wi-Fi: ON"
     fi
@@ -29,50 +91,33 @@ header() {
     echo "$1"
 }
 
-toggle() {
-    status
-    [[ "$wifi_state" == "enabled" ]] \
-        && nmcli radio wifi off \
-        || nmcli radio wifi on
-}
+wifi_list_networks() {
 
-connect() {
-    echo "Connecting to: $1"
-    nmcli device wifi connect "$1" --ask
-}
+    local -a nets=()
 
-scan_networks() {
-    local i
-    for i in {1..10}; do
-        mapfile -t nets < <(
-            nmcli -t -f SSID,SIGNAL,SECURITY device wifi list --rescan yes |
-            awk -F: '$1 !~ /^[[:space:]]*$/'
-        )
-        (( ${#nets[@]} )) && return 0
-        sleep 1
-    done
-    return 1
-}
-
-list_networks() {
-    status
-
-    if [[ "$wifi_state" == "disabled" ]]; then
-        header "Wi-Fi is OFF"
-        echo "1) Turn Wi-Fi ON"
-        echo "2) Back"
-        echo
-        read -rp "Choice: " c
-
-        [[ "$c" == "1" ]] || return
-        toggle
+    # Make sure the Wi-Fi is active.
+    if ! wifi_is_on; then
+        wifi_toggle
     fi
 
     header "Searching for networks..."
 
-    if ! scan_networks; then
+    # Scan for available networks.
+    # Short retry to handle interface warm-up; deduplicate and ignore empty SSIDs.
+    for i in {1..3}; do
+        mapfile -t nets < <(
+            nmcli -t -f SSID,SIGNAL,SECURITY device wifi list --rescan yes |
+            awk -F: '!seen[$1]++ && $1 !~ /^[[:space:]]*$/'
+        )
+
+        (( ${#nets[@]} )) && break
+        sleep 0.5
+    done
+
+    if (( ${#nets[@]} == 0 )); then
         echo "No networks found."
         read -rp "Press Enter to return..." _
+
         return
     fi
 
@@ -89,17 +134,24 @@ list_networks() {
     echo
     read -rp "Network number (or Enter to cancel): " c
 
+    # Validate user input
     if ! [[ "$c" =~ ^[0-9]+$ ]]; then
         return
     fi
-
-    idx=$((c - 1))
+    
+    local idx=$((c - 1))
+    
     if (( idx < 0 || idx >= ${#nets[@]} )); then
         return
     fi
 
-    connect "${nets[$idx]%%:*}"
+    wifi_connect "${nets[$idx]%%:*}"
+
+    refresh_state
 }
+
+## Program entry point
+refresh_state
 
 while true; do
     header "Main menu"
@@ -110,8 +162,8 @@ while true; do
     read -rp "Choice: " c
 
     case "$c" in
-        1) list_networks ;;
-        2) toggle ;;
+        1) wifi_list_networks ;;
+        2) wifi_toggle ;;
         *) exit 0 ;;
     esac
 done
