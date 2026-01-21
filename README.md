@@ -5,6 +5,9 @@ Simple script to manage Wi-Fi connections using **nmcli** (NetworkManager).
 Ideal for environments without a graphical interface, tiling window managers, and minimalist setups.
 
 
+![MainMain menu](previews/main_menu.png)
+
+
 ## Requirements
 
 - nmcli (NetworkManager)

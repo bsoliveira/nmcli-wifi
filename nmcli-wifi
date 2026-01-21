@@ -122,7 +122,7 @@ wifi_list_networks() {
     fi
 
     header "Available networks"
-    printf "%-3s %-6s %-10s %s\n" "#" "SIGNAL" "SECURITY" "SSID"
+    printf "%-2s %-6s %-10s %s\n" "#" "SIGNAL" "SECURITY" "SSID"
 
     for i in "${!nets[@]}"; do
         awk -F: -v n=$((i+1)) '
